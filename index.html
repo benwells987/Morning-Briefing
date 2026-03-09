@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -757,11 +758,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // ── FMP fetch ─────────────────────────────────────────────────
 async function fmp(endpoint) {
+  // Use new /stable/ base (post-Aug 2025 FMP API)
   const sep = endpoint.includes('?') ? '&' : '?';
-  const url = `https://financialmodelingprep.com/api/v3/${endpoint}${sep}apikey=${FMP_KEY}`;
+  const url = `https://financialmodelingprep.com/stable/${endpoint}${sep}apikey=${FMP_KEY}`;
   const res  = await fetch(url);
   if (!res.ok) throw new Error(`FMP ${res.status}: ${endpoint}`);
-  return res.json();
+  const json = await res.json();
+  // New stable API wraps some results in { data: [...] }
+  if (json && !Array.isArray(json) && json.data) return json.data;
+  return json;
 }
 
 // ── Status helpers ────────────────────────────────────────────
@@ -866,8 +871,11 @@ function renderCalendar(events) {
 // ── Load market indices ───────────────────────────────────────
 async function loadIndices() {
   try {
-    const [spx] = await fmp('quote/SPY');
-    const [vix] = await fmp('quote/%5EVIX');
+    // New stable endpoint: /stable/quote?symbol=SPY
+    const spxArr = await fmp('quote?symbol=SPY');
+    const vixArr = await fmp('quote?symbol=%5EVIX');
+    const spx = Array.isArray(spxArr) ? spxArr[0] : spxArr;
+    const vix = Array.isArray(vixArr) ? vixArr[0] : vixArr;
 
     if (spx) {
       document.getElementById('spx-price').textContent = `$${fmtPrice(spx.price)}`;
@@ -912,12 +920,12 @@ async function loadAllData() {
   document.getElementById('refresh-btn').disabled = true;
 
   try {
-    // Parallel fetch: movers + watchlist quotes + calendar
+    // New stable endpoints for movers
     const [gainers, losers, actives, calData] = await Promise.all([
-      fmp('stock_market/gainers'),
-      fmp('stock_market/losers'),
-      fmp('stock_market/actives'),
-      fmp(`economic_calendar?from=${todayStr()}&to=${todayStr()}`),
+      fmp('biggest-gainers'),
+      fmp('biggest-losers'),
+      fmp('most-actives'),
+      fmp(`economic-calendar?from=${todayStr()}&to=${todayStr()}`),
     ]);
 
     renderMovers('gainers-body', gainers);
@@ -928,11 +936,11 @@ async function loadAllData() {
     // Store for AI briefing
     marketData = { gainers: gainers?.slice(0,10), losers: losers?.slice(0,10), actives: actives?.slice(0,5) };
 
-    // Watchlist quotes
+    // Watchlist quotes — new stable endpoint uses ?symbol= with comma-separated list
     const syms   = WATCHLIST.map(w => w.symbol).join(',');
-    const quotes = await fmp(`quote/${syms}`);
+    const quotes = await fmp(`quote?symbol=${syms}`);
     const qMap   = {};
-    (quotes || []).forEach(q => { qMap[q.symbol] = q; });
+    (Array.isArray(quotes) ? quotes : []).forEach(q => { qMap[q.symbol] = q; });
     renderWatchlist(qMap);
 
     await loadIndices();
